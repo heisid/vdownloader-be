@@ -160,20 +160,20 @@ def get_video_info():
 def download_video():
     data = request.json
     url = data.get('url')
-    format_id = data.get('itag')  # Using 'itag' for compatibility with frontend
+    format_id = data.get('format_id')
 
     if not url or not format_id:
         log_event("download_request", url=url, status="error", details="URL and format_id are required")
         return jsonify({'error': 'URL and format_id are required'}), 400
 
     try:
-        download_id = uuid.uuid4().hex
-        temp_dir = os.path.join(DOWNLOAD_FOLDER, f"temp_{download_id}")
-        os.makedirs(temp_dir, exist_ok=True)
+        file_id = uuid.uuid4().hex
+        parent_dir = os.path.join(DOWNLOAD_FOLDER, file_id)
+        os.makedirs(parent_dir, exist_ok=True)
 
         ydl_opts = {
             'format': format_id,
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(parent_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
         }
@@ -184,31 +184,22 @@ def download_video():
             if 'entries' in info:  # It's a playlist
                 info = info['entries'][0]
 
-            downloaded_files = os.listdir(temp_dir)
+            downloaded_files = os.listdir(parent_dir)
             if not downloaded_files:
                 raise Exception("Download failed: No files found")
 
-            original_file = os.path.join(temp_dir, downloaded_files[0])
-            file_ext = os.path.splitext(original_file)[1]
-            final_filename = f"{download_id}{file_ext}"
-            final_path = os.path.join(DOWNLOAD_FOLDER, final_filename)
+            download_path = os.path.join(parent_dir, downloaded_files[0])
 
-            shutil.move(original_file, final_path)
+            file_size_mb = round(os.path.getsize(download_path) / (1024 * 1024), 2)
 
-            # Clean up temp directory
-            shutil.rmtree(temp_dir)
-
-            file_size_mb = round(os.path.getsize(final_path) / (1024 * 1024), 2)
-
-            format_info = None
+            # format_info = None
             resolution = "Unknown"
             for f in info.get('formats', []):
                 if f.get('format_id') == format_id:
-                    format_info = f
+                    # format_info = f
                     resolution = f.get('resolution', 'Unknown')
                     break
 
-            # Log event
             log_event("download_request", url=url, details={
                 "video_id": info.get('id', 'unknown'),
                 "title": info.get('title', 'Unknown'),
@@ -218,7 +209,7 @@ def download_video():
             })
 
             # Return the download URL
-            download_url = f"/api/file/{final_filename}"
+            download_url = f"/api/file/{file_id}"
             return jsonify({
                 'download_url': download_url,
                 'filename': info.get('title', 'video')
@@ -227,19 +218,13 @@ def download_video():
         error_msg = str(e)
         log_event("download_request", url=url, status="error", details=error_msg)
         return jsonify({'error': error_msg}), 500
-    finally:
-        if 'temp_dir' in locals() and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except:
-                pass
 
 
 @app.route('/api/convert-to-mp3', methods=['POST'])
 def convert_to_mp3():
     data = request.json
     url = data.get('url')
-    format_id = data.get('itag')  # Using 'itag' for compatibility with frontend
+    format_id = data.get('format_id')
 
     if not url:
         log_event("mp3_conversion", url=url, status="error", details="URL is required")
@@ -250,13 +235,13 @@ def convert_to_mp3():
         return jsonify({'error': 'FFmpeg is not installed on the server. MP3 conversion is not available.'}), 500
 
     try:
-        download_id = uuid.uuid4().hex
-        temp_dir = os.path.join(DOWNLOAD_FOLDER, f"temp_{download_id}")
-        os.makedirs(temp_dir, exist_ok=True)
+        file_id = uuid.uuid4().hex
+        parent_dir = os.path.join(DOWNLOAD_FOLDER, file_id)
+        os.makedirs(parent_dir, exist_ok=True)
 
         ydl_opts = {
             'format': 'bestaudio/best' if not format_id else format_id,
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(parent_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
         }
@@ -267,17 +252,19 @@ def convert_to_mp3():
             if 'entries' in info:  # It's a playlist
                 info = info['entries'][0]
 
-            downloaded_files = os.listdir(temp_dir)
+            downloaded_files = os.listdir(parent_dir)
             if not downloaded_files:
                 raise Exception("Download failed: No files found")
 
-            original_file = os.path.join(temp_dir, downloaded_files[0])
-            mp3_filename = f"{download_id}.mp3"
-            mp3_path = os.path.join(DOWNLOAD_FOLDER, mp3_filename)
+            video_file_name = downloaded_files[0]
+            base_file_name = "".join(video_file_name.split(".")[:-1])
+            video_path = os.path.join(parent_dir, video_file_name)
+            mp3_filename = f"{base_file_name}.mp3"
+            mp3_path = os.path.join(parent_dir, mp3_filename)
 
             cmd = [
                 'ffmpeg',
-                '-i', original_file,
+                '-i', video_path,
                 '-vn',  # No video
                 '-ar', '44100',  # Audio sampling rate
                 '-ac', '2',  # Stereo
@@ -291,7 +278,7 @@ def convert_to_mp3():
             if process.returncode != 0:
                 raise Exception(f"FFmpeg conversion failed: {process.stderr.decode()}")
 
-            shutil.rmtree(temp_dir)
+            os.remove(video_path)
 
             file_size_mb = round(os.path.getsize(mp3_path) / (1024 * 1024), 2)
 
@@ -301,7 +288,7 @@ def convert_to_mp3():
                 "file_size_mb": file_size_mb
             })
 
-            download_url = f"/api/file/{mp3_filename}"
+            download_url = f"/api/file/{file_id}"
             return jsonify({
                 'download_url': download_url,
                 'filename': f"{info.get('title', 'audio')}.mp3"
@@ -310,19 +297,16 @@ def convert_to_mp3():
         error_msg = str(e)
         log_event("mp3_conversion", url=url, status="error", details=error_msg)
         return jsonify({'error': error_msg}), 500
-    finally:
-        # Make sure temp directory is cleaned up in case of errors
-        if 'temp_dir' in locals() and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except:
-                pass
 
 
-@app.route('/api/file/<filename>', methods=['GET'])
-def get_file(filename):
-    file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-    if os.path.exists(file_path):
+@app.route('/api/file/<file_id>', methods=['GET'])
+def get_file(file_id):
+    parent_dir = os.path.join(DOWNLOAD_FOLDER, file_id)
+    files_in_parent = os.path.exists(parent_dir) and os.listdir(parent_dir)
+    filename = ""
+    if files_in_parent:
+        filename = files_in_parent[0]
+        file_path = os.path.join(parent_dir, filename)
         log_event("file_access", details={"filename": filename})
         return send_file(file_path, as_attachment=True)
     else:
@@ -331,20 +315,26 @@ def get_file(filename):
 
 
 def cleanup_downloads():
+    max_age = 3600
     while True:
         now = time.time()
-        for filename in os.listdir(DOWNLOAD_FOLDER):
-            file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-            if not os.path.isfile(file_path):
-                continue
+        for file_id in os.listdir(DOWNLOAD_FOLDER):
+            parent_dir = os.path.join(DOWNLOAD_FOLDER, file_id)
+            files = os.listdir(parent_dir)
 
-            if now - os.path.getmtime(file_path) > 3600:
-                try:
-                    os.remove(file_path)
-                    log_event("file_cleanup", details={"filename": filename})
-                except Exception as e:
-                    log_event("file_cleanup", status="error", details=f"Error removing {filename}: {str(e)}")
-        time.sleep(3600)
+            for filename in files:
+                file_path = os.path.join(parent_dir, filename)
+                if now - os.path.getmtime(file_path) > max_age:
+                    try:
+                        os.remove(file_path)
+                        log_event("file_cleanup", details={"filename": filename})
+                    except Exception as e:
+                        log_event("file_cleanup", status="error", details=f"Error removing {filename}: {str(e)}")
+
+            if not os.listdir(parent_dir):
+                shutil.rmtree(parent_dir)
+
+        time.sleep(max_age)
 
 
 if __name__ == '__main__':

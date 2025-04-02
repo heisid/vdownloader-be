@@ -1,0 +1,31 @@
+POST http://localhost:5000/api/info
+Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/watch?v=l0xh4qopQpk"
+}
+
+###
+
+POST http://localhost:5000/api/download
+Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/watch?v=l0xh4qopQpk",
+  "format_id": "18"
+}
+
+###
+
+GET http://localhost:5000/api/file/cdae1fe70cd14777a0eeef76415637f5
+Accept: */*
+
+###
+
+POST http://localhost:5000/api/convert-to-mp3
+Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/watch?v=l0xh4qopQpk",
+  "format_id": "18"
+}
