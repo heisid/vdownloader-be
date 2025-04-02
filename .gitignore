@@ -1,0 +1,4 @@
+.venv/
+log.db
+__pycache__/
+downloads/
